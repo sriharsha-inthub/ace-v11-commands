@@ -1,0 +1,129 @@
+################################################################
+### ACE CLI Administration ###
+# Create Integration Node with 
+#		1. service account details to run as
+# 		2. http listener port set - 7700
+#		3. statistics interval for archive mode - 2 min
+#		4. activate admin security
+# https://www.ibm.com/support/knowledgecenter/en/SSTTDS_11.0.0/com.ibm.etools.mft.doc/mqsibarcmd_.htm
+################################################################
+set ACENODE_NAME=%1
+mqsilist
+mqsicreatebroker %ACENODE_NAME% -i mintman -a somepwd -v 2 -P 7700 -s active
+mqsilist
+mqsistart %ACENODE_NAME%
+mqsicreateexecutiongroup %ACENODE_NAME% -e SERVER1
+mqsicreateexecutiongroup %ACENODE_NAME% -e SERVER2
+
+### Create roles
+mqsiwebuseradmin %ACENODE_NAME% -c -u acewebadmin -a somepwd1 -r adminrole
+mqsiwebuseradmin %ACENODE_NAME% -c -u acewebuser -a somepwd2 -r viewrole
+
+### Enable AA as file mode
+mqsichangeauthmode %ACENODE_NAME% -s active -m file
+mqsireportauthmode %ACENODE_NAME%
+
+mqsireportfileauth %ACENODE_NAME% -r adminrole
+mqsireportfileauth %ACENODE_NAME% -r viewrole
+mqsireportfileauth %ACENODE_NAME% -l
+
+### Set permissions for roles
+mqsichangefileauth %ACENODE_NAME% -r adminrole -e SERVER1 -p read+,write+,execute+
+mqsichangefileauth %ACENODE_NAME% -r adminrole -e SERVER2 -p read+,write+,execute+
+mqsichangefileauth %ACENODE_NAME% -r adminrole -p read+,write+,execute+
+mqsichangefileauth %ACENODE_NAME% -r viewrole -e SERVER1 -p read+,write-,execute-
+mqsichangefileauth %ACENODE_NAME% -r viewrole -e SERVER2 -p read+,write-,execute-
+mqsichangefileauth %ACENODE_NAME% -r viewrole -p read+,write-,execute-
+
+### Enable datacapture
+mqsichangefileauth %ACENODE_NAME% -r adminrole -o DataCapture -p all+
+mqsichangefileauth %ACENODE_NAME% -r adminrole -o Data -p all+
+mqsichangefileauth %ACENODE_NAME% -r viewrole -o Data -p read+
+
+### Show permissions for roles
+mqsireportfileauth %ACENODE_NAME% -l
+mqsireportfileauth %ACENODE_NAME% -e SERVER1  -l
+mqsireportfileauth %ACENODE_NAME% -e SERVER2  -l
+
+mqsistop %ACENODE_NAME%
+mqsistart %ACENODE_NAME%
+
+######### Flow accounting & statistics - Archive/Snapshot
+mqsireportflowstats ACENODE1 -s -a -e SERVER1 --all-applications
+  ACENODE1 -c active -a -s -e SERVER1 --all-applications --all-flows
+mqsichangeflowstats ACENODE1 -s -e SERVER1 --all-applications --all-flows --control active --output-format json
+mqsireportflowstats ACENODE1 -s -a -e SERVER1 --all-applications
+
+######### Event monitoring
+mqsireportflowmonitoring ACENODE1 -e SERVER1 --all-applications
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 --all-applications --all-flows --control active
+mqsichangeflowmonitoring --control active --admin-host localhost --admin-port 7600 --all-applications
+
+######### Resource statistics (JVM, FTP, CPU, Memory, JDBC, JMS & ....)
+mqsireportresourcestats ACENODE1 -e SERVER1
+mqsichangeresourcestats ACENODE1 -e SERVER1 -c active
+mqsireportresourcestats ACENODE1 -e SERVER1
+
+
+echo "Navigate to ["%MQSI_WORKPATH%\components\%ACENODE_NAME%"] ..."
+C:\ProgramData\IBM\MQSI\components\ACEDEVIN1
+echo "Update the node.conf.yaml file, activating basicAuth & adminSecurity with Integration Node security persmission"
+
+pause
+
+mqsistop %ACENODE_NAME%
+mqsistart %ACENODE_NAME%
+mqsicreateexecutiongroup %ACENODE_NAME% -e ISERVER
+echo "Navigate to ["%MQSI_WORKPATH%\components\%ACENODE_NAME%"] ..."
+echo "Update the node.conf.yaml file, activating Integration Server security persmission"
+
+pause
+
+
+mqsistop %ACENODE_NAME%
+mqsistart %ACENODE_NAME%
+
+######### Extract monitoring events as profile.
+
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k CalculatorAPI -f CalculatorHttpReq -x E:\ibm-ace-ws\MonitoringProfilePolicy\CalculatorAPI.monprofile.xml
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k CalculatorAPI --all-flows
+mqsichangeflowmonitoring --control active --admin-host localhost --admin-port 7600 --all-applications
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 --application CalculatorAPI --all-flows --control active
+
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate -f InitiateProcessOrder -x E:\ibm-ace-ws\MonitoringProfilePolicy\1-OrderInitiate.monprofile.xml
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k 2-Order-CreateCustomer -f cle_createcustomer -x E:\ibm-ace-ws\MonitoringProfilePolicy\2-Order-CreateCustomer.monprofile.xml
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k 3-Order-Allocate-Req -f InitiateReleaseOrder -x E:\ibm-ace-ws\MonitoringProfilePolicy\3-Order-Allocate-Req.monprofile.xml
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k 4-Order-Allocate-Res -f be_allocatereleaseorder -x E:\ibm-ace-ws\MonitoringProfilePolicy\4-Order-Allocate-Res.monprofile.xml
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k 4-Order-Allocate-Res --all-flows
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k 5-Order-Create --all-flows
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 4-Order-Allocate-Res -m 4-Order-Allocate-Res-Policy
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 5-Order-Create -m 5-Order-Create-Policy
+
+
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k CalculatorAPI --all-flows
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k CalculatorWS --all-flows
+
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k CalculatorAPI -m CalculatorAPI.monprofile
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k CalculatorWS -m CalculatorWS.monprofile
+
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k CalculatorAPI --all-flows
+mqsireportflowmonitoring ACENODE1 -e SERVER1 -k CalculatorWS --all-flows
+
+
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate --all-flows -m 1-OrderInitiate.monprofile
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate --all-flows -m 1-OrderInitiate.monprofile
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate --all-flows -m 1-OrderInitiate.monprofile
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate --all-flows -m 1-OrderInitiate.monprofile
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate --all-flows -m 1-OrderInitiate.monprofile
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate --all-flows -m 1-OrderInitiate.monprofile
+mqsichangeflowmonitoring ACENODE1 -e SERVER1 -k 1-OrderInitiate --all-flows -m 1-OrderInitiate.monprofile
+ACE.ISERVER1.BUSINESS.EVENTS/$SYS/Broker/integration_server/Monitoring/ISERVER1/#/#
+================================
+$Root/XMLNSC/Orders/Order[1]/Id
+$Root/JSON/Data/Order/Number
+$Root/JSON/Data/ReleaseOrderRequest/Number
+$Root/JSON/Data/ReleaseOrderResponse/Number
+$Root/JSON/Data/ReleaseOrderProcess/Number
+$Root/JSON/Data/ReleaseOrderStatus/Number
+
+$Environment/Monitoring/EventCorrelation/globalTransactionId
